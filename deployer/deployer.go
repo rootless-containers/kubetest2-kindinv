@@ -87,6 +87,16 @@ func New(opts types.Options) (types.Deployer, *pflag.FlagSet) {
 	if s := gopath(); s != "" {
 		kubeRoot = filepath.Join(s, "src", "github.com", "kubernetes", "kubernetes")
 	}
+	username := os.Getenv("USER")
+	switch username {
+	case "", "root":
+		username = "user"
+	}
+	localUser := os.Getenv("USER")
+	if localUser == "" {
+		localUser = "unknown"
+	}
+
 	d := &deployer{
 		commonOptions: opts,
 		KubeRoot:      kubeRoot,
@@ -95,6 +105,8 @@ func New(opts types.Options) (types.Deployer, *pflag.FlagSet) {
 		InstanceImage: "ubuntu-os-cloud/ubuntu-2204-lts",
 		InstanceType:  "n2-standard-4",
 		DiskGiB:       200,
+		User:          username,
+		localUser:     localUser,
 		KindRootless:  false,
 	}
 	// assertions
@@ -115,6 +127,8 @@ type deployer struct {
 	InstanceImage string `desc:"Instance image"`
 	InstanceType  string `desc:"Instance type"`
 	DiskGiB       int    `flag:"~disk-gib" desc:"Disk size in GiB"`
+	User          string `desc:"remote username"`
+	localUser     string
 
 	KindRootless bool `desc:"Run kind in rootless mode"`
 
@@ -134,11 +148,7 @@ func (d *deployer) kindImageRef() string {
 }
 
 func (d *deployer) instanceName() string {
-	userName := os.Getenv("USER")
-	if userName == "" {
-		userName = "unknown"
-	}
-	return fmt.Sprintf("kt2-%s-%s-%s", Name, userName, d.shortRunID())
+	return fmt.Sprintf("kt2-%s-%s-%s", Name, d.localUser, d.shortRunID())
 }
 
 func (d *deployer) networkName() string {
@@ -168,7 +178,7 @@ func (d *deployer) gcloud(ctx context.Context, args ...string) (*exec.Cmd, error
 }
 
 func (d *deployer) sshOptionPairs() []string {
-	return []string{"StrictHostKeyChecking=no"}
+	return []string{"StrictHostKeyChecking=no", "User=" + d.User}
 }
 
 func (d *deployer) ssh(ctx context.Context, args ...string) *exec.Cmd {
@@ -278,11 +288,7 @@ func (d *deployer) upVM(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	userName := os.Getenv("USER")
-	if userName == "" {
-		return errors.New("needs $USER to be set")
-	}
-	sshKeysContent := []byte(userName + ":" + string(gcePubContent))
+	sshKeysContent := []byte(d.User + ":" + string(gcePubContent))
 	runDir := d.commonOptions.RunDir()
 	sshKeysPath := filepath.Join(runDir, runDirSSHKeys)
 	_ = os.RemoveAll(sshKeysPath)
@@ -291,7 +297,7 @@ func (d *deployer) upVM(ctx context.Context) error {
 	}
 
 	nwName, fwRuleName, instName := d.networkName(), d.firewallRuleName(), d.instanceName()
-	description := fmt.Sprintf("kubetest2-%s instance (for user %q)", Name, userName)
+	description := fmt.Sprintf("kubetest2-%s instance (login ID: %q)", Name, d.User)
 	instImgPair := strings.SplitN(d.InstanceImage, "/", 2)
 
 	gcloudCmds := [][]string{
@@ -300,7 +306,7 @@ func (d *deployer) upVM(ctx context.Context) error {
 		{"compute", "instances", "create",
 			"--zone=" + d.GCPZone,
 			"--description=" + description,
-			"--labels=owner=" + userName,
+			"--labels=owner=" + d.localUser,
 			"--network=" + nwName,
 			"--image-project=" + instImgPair[0],
 			"--image-family=" + instImgPair[1],
@@ -359,7 +365,7 @@ func (d *deployer) upVM(ctx context.Context) error {
 	if d.KindRootless {
 		cmd = d.ssh(ctx, sshAddr, "--", "dockerd-rootless-setuptool.sh", "install", "-f")
 	} else {
-		cmd = d.ssh(ctx, sshAddr, "--", "sudo", "usermod -aG", "docker", userName)
+		cmd = d.ssh(ctx, sshAddr, "--", "sudo", "usermod -aG", "docker", d.User)
 	}
 	if err = execCmd(cmd); err != nil {
 		return err
