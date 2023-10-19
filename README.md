@@ -33,6 +33,7 @@ kubetest2 kindinv \
   --gcp-zone=us-west1-a \
   --instance-image=ubuntu-os-cloud/ubuntu-2204-lts \
   --instance-type=n2-standard-4 \
+  --user=rootless \
   --kind-rootless \
   --kube-root=${GOPATH}/src/github.com/kubernetes/kubernetes \
   --build \
