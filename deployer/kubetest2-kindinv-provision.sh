@@ -5,9 +5,11 @@
 set -eux -o pipefail
 
 # Install dependencies (apt-get)
+# - make:   for `kind build node-image`
+# - uidmap: for rootless
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y uidmap
+apt-get install -y make uidmap
 
 # Install dependencies (snap)
 for f in go kubectl; do

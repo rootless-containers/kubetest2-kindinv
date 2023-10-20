@@ -8,10 +8,6 @@ This driver was written for the sake of running the tests with [rootless kind](h
 ## Requirements
 - [kubetest2](https://github.com/kubernetes-sigs/kubetest2).
 
-- Docker and [`kind`](https://kind.sigs.k8s.io/) have to be installed on the local host,
-  as the driver executes `kind build node-image` on the local host (currently).
-  The local host can be macOS.
-
 - `gcloud` command has to be configured with the permissions for creating and removing the following resources:
   - GCE Instances
   - VPCs
