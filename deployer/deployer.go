@@ -53,8 +53,7 @@ const (
 	gcloud = "gcloud"
 	ssh    = "ssh"
 	rsync  = "rsync"
-	kind   = "kind"
-	docker = "docker"
+	git    = "git"
 )
 
 // the name of the files in runDir
@@ -195,6 +194,29 @@ func (d *deployer) rsync(ctx context.Context, args ...string) *exec.Cmd {
 		e += " -o " + o
 	}
 	return exec.CommandContext(ctx, rsync, append([]string{"-e", e}, args...)...)
+}
+
+func (d *deployer) git(ctx context.Context, args ...string) *exec.Cmd {
+	e := ssh
+	for _, o := range d.sshOptionPairs() {
+		e += " -o " + o
+	}
+	cmd := exec.CommandContext(ctx, git, args...)
+	cmd.Env = append(os.Environ(), "GIT_SSH_COMMAND="+e)
+	return cmd
+}
+
+func (d *deployer) gitDescribeWithRepoDir(ctx context.Context, repoDir string) (string, error) {
+	cmd := d.git(ctx, "describe")
+	cmd.Dir = repoDir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	b, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to run %s: %w (stdout=%q, stderr=%q)",
+			stringifyCmdArgs(cmd.Args), err, string(b), stderr.String())
+	}
+	return strings.TrimSpace(string(b)), nil
 }
 
 func stringifyCmdArgs(ss []string) string {
@@ -505,16 +527,6 @@ func (d *deployer) Build() error {
 		}
 	}
 
-	// Build the kind image (on the local host, currently)
-	cmd := exec.CommandContext(ctx, kind, "build", "node-image", "--image="+d.kindImageRef(), d.KubeRoot)
-	if err := execCmd(cmd); err != nil {
-		return err
-	}
-	kindImageLocal := filepath.Join(runDir, runDirKindImageTar)
-	cmd = exec.CommandContext(ctx, docker, "image", "save", "--output="+kindImageLocal, d.kindImageRef())
-	if err := execCmd(cmd); err != nil {
-		return err
-	}
 	isUp, err := d.IsUp()
 	if err != nil {
 		return err
@@ -524,7 +536,6 @@ func (d *deployer) Build() error {
 			return err
 		}
 	}
-	// Load the image archive to into the remote docker
 	sshAddr, err := d.sshAddr()
 	if err != nil {
 		return err
@@ -533,13 +544,44 @@ func (d *deployer) Build() error {
 	if err != nil {
 		return err
 	}
-	kindImageRemote := filepath.Join(remoteHome, "kind-image.tar") // docker CLI cannot parse "~"
-	cmd = d.rsync(ctx, "-av", "--progress", "--compress", kindImageLocal, sshAddr+":"+kindImageRemote)
+	gopathKK := filepath.Join(remoteHome, "go", "src", "github.com", "kubernetes", "kubernetes")
+
+	// Clone k/k from github, assuming that cloning the repo from github
+	// is faster than pushing it from the local host.
+	cmd := d.ssh(ctx, sshAddr, "--",
+		fmt.Sprintf(`/bin/sh -euxc "[ -e %s ] || git clone --progress https://github.com/kubernetes/kubernetes.git %s"`,
+			gopathKK, gopathKK))
 	if err = execCmd(cmd); err != nil {
 		return err
 	}
-	cmd = d.ssh(ctx, sshAddr, "--", "docker", "image", "load", "--input="+kindImageRemote)
+	cmd = d.ssh(ctx, sshAddr, "--",
+		fmt.Sprintf(`/bin/sh -euxc "cd %s && git config --add receive.denyCurrentBranch warn"`,
+			gopathKK))
 	if err = execCmd(cmd); err != nil {
+		return err
+	}
+
+	// Push the local changes to the remote
+	headCommit, err := d.gitDescribeWithRepoDir(ctx, d.KubeRoot)
+	if err != nil {
+		return fmt.Errorf("failed to get the head of %q: %w", d.KubeRoot, err)
+	}
+	cmd = d.git(ctx, "push", "--progress", "-f",
+		fmt.Sprintf("ssh://%s@%s:%s", d.User, sshAddr, gopathKK))
+	cmd.Dir = d.KubeRoot
+	if err = execCmd(cmd); err != nil {
+		return err
+	}
+	cmd = d.ssh(ctx, sshAddr, "--",
+		fmt.Sprintf(`/bin/sh -euxc "cd %s && git checkout %s"`, gopathKK, headCommit))
+	if err = execCmd(cmd); err != nil {
+		return err
+	}
+
+	// Build the kind image
+	cmd = d.ssh(ctx, sshAddr, "--", "kind", "build", "node-image",
+		"--image="+d.kindImageRef(), gopathKK)
+	if err := execCmd(cmd); err != nil {
 		return err
 	}
 	return nil
