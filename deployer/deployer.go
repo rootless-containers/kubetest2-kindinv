@@ -512,9 +512,11 @@ func (d *deployer) Build() error {
 			}
 			switch f {
 			case "e2e.test":
-				return fmt.Errorf("%w (Hint: `make WHAT=test/e2e/e2e.test -C $(go env GOPATH)/src/k8s.io/kubernetes`)", err)
+				klog.Warning(fmt.Errorf("%w (Hint: `make WHAT=test/e2e/e2e.test -C $(go env GOPATH)/src/k8s.io/kubernetes`)", err))
+				continue
 			case "ginkgo":
-				return fmt.Errorf("%w (Hint: `make ginkgo -C $(go env GOPATH)/src/k8s.io/kubernetes`)", err)
+				klog.Warning(fmt.Errorf("%w (Hint: `make ginkgo -C $(go env GOPATH)/src/k8s.io/kubernetes`)", err))
+				continue
 			default:
 				klog.Warning(err)
 				continue
