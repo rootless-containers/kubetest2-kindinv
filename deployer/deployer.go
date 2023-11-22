@@ -84,7 +84,7 @@ func gopath() string {
 func New(opts types.Options) (types.Deployer, *pflag.FlagSet) {
 	kubeRoot := "."
 	if s := gopath(); s != "" {
-		kubeRoot = filepath.Join(s, "src", "github.com", "kubernetes", "kubernetes")
+		kubeRoot = filepath.Join(s, "src", "k8s.io", "kubernetes")
 	}
 	username := os.Getenv("USER")
 	switch username {
@@ -119,7 +119,7 @@ func New(opts types.Options) (types.Deployer, *pflag.FlagSet) {
 type deployer struct {
 	commonOptions types.Options
 
-	KubeRoot string `desc:"${GOPATH}/src/github.com/kubernetes/kubernetes"`
+	KubeRoot string `desc:"${GOPATH}/src/k8s.io/kubernetes"`
 
 	GCPProject    string `desc:"GCP project, defaults to $CLOUDSDK_CORE_PROJECT"`
 	GCPZone       string `desc:"GCP zone, defaults to $CLOUDSDK_COMPUTE_ZONE"`
@@ -512,9 +512,9 @@ func (d *deployer) Build() error {
 			}
 			switch f {
 			case "e2e.test":
-				return fmt.Errorf("%w (Hint: `make WHAT=test/e2e/e2e.test -C $(go env GOPATH)/src/github.com/kubernetes/kubernetes`)", err)
+				return fmt.Errorf("%w (Hint: `make WHAT=test/e2e/e2e.test -C $(go env GOPATH)/src/k8s.io/kubernetes`)", err)
 			case "ginkgo":
-				return fmt.Errorf("%w (Hint: `make ginkgo -C $(go env GOPATH)/src/github.com/kubernetes/kubernetes`)", err)
+				return fmt.Errorf("%w (Hint: `make ginkgo -C $(go env GOPATH)/src/k8s.io/kubernetes`)", err)
 			default:
 				klog.Warning(err)
 				continue
@@ -544,7 +544,7 @@ func (d *deployer) Build() error {
 	if err != nil {
 		return err
 	}
-	gopathKK := filepath.Join(remoteHome, "go", "src", "github.com", "kubernetes", "kubernetes")
+	gopathKK := filepath.Join(remoteHome, "go", "src", "k8s.io", "kubernetes")
 
 	// Clone k/k from github, assuming that cloning the repo from github
 	// is faster than pushing it from the local host.

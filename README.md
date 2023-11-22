@@ -18,7 +18,7 @@ This driver was written for the sake of running the tests with [rootless kind](h
 ```bash
 go install github.com/rootless-containers/kubetest2-kindinv@master
 
-cd ${GOPATH}/src/github.com/kubernetes/kubernetes
+cd ${GOPATH}/src/k8s.io/kubernetes
 make WHAT=test/e2e/e2e.test
 make ginkgo
 make kubectl
@@ -31,7 +31,7 @@ kubetest2 kindinv \
   --instance-type=n2-standard-4 \
   --user=rootless \
   --kind-rootless \
-  --kube-root=${GOPATH}/src/github.com/kubernetes/kubernetes \
+  --kube-root=${GOPATH}/src/k8s.io/kubernetes \
   --build \
   --up \
   --down \
