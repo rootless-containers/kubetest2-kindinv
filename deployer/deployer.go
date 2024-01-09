@@ -37,7 +37,9 @@ import (
 	"github.com/rootless-containers/kubetest2-kindinv/version"
 	"github.com/spf13/pflag"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/boskos/client"
 	"sigs.k8s.io/kubetest2/pkg/artifacts"
+	"sigs.k8s.io/kubetest2/pkg/boskos"
 	"sigs.k8s.io/kubetest2/pkg/types"
 )
 
@@ -69,6 +71,13 @@ const (
 	artifactsDirLogs = "logs"
 )
 
+// Boskos
+const (
+	// gceProjectResourceType is called "gce" project in Boskos,
+	// while it is called "gcp" project in this CLI.
+	gceProjectResourceType = "gce-project"
+)
+
 // gopath returns GOPATH or an empty string.
 func gopath() string {
 	if goBinary, err := exec.LookPath("go"); err == nil {
@@ -97,16 +106,21 @@ func New(opts types.Options) (types.Deployer, *pflag.FlagSet) {
 	}
 
 	d := &deployer{
-		commonOptions: opts,
-		KubeRoot:      kubeRoot,
-		GCPProject:    os.Getenv("CLOUDSDK_CORE_PROJECT"),
-		GCPZone:       os.Getenv("CLOUDSDK_COMPUTE_ZONE"),
-		InstanceImage: "ubuntu-os-cloud/ubuntu-2204-lts",
-		InstanceType:  "n2-standard-4",
-		DiskGiB:       200,
-		User:          username,
-		localUser:     localUser,
-		KindRootless:  false,
+		commonOptions:                  opts,
+		KubeRoot:                       kubeRoot,
+		GCPProject:                     os.Getenv("CLOUDSDK_CORE_PROJECT"),
+		GCPZone:                        os.Getenv("CLOUDSDK_COMPUTE_ZONE"),
+		InstanceImage:                  "ubuntu-os-cloud/ubuntu-2204-lts",
+		InstanceType:                   "n2-standard-4",
+		DiskGiB:                        200,
+		User:                           username,
+		localUser:                      localUser,
+		KindRootless:                   false,
+		BoskosAcquireTimeoutSeconds:    5 * 60,
+		BoskosHeartbeatIntervalSeconds: 5 * 60,
+		BoskosLocation:                 "http://boskos.test-pods.svc.cluster.local.",
+		boskos:                         nil,
+		boskosHeartbeatClose:           make(chan struct{}),
 	}
 	// assertions
 	var (
@@ -132,6 +146,17 @@ type deployer struct {
 	KindRootless bool `desc:"Run kind in rootless mode"`
 
 	isUp bool
+
+	// Boskos flags correspond to https://github.com/kubernetes-sigs/kubetest2/blob/71238a9645df6fbd7eaac9a36f635c22f1566168/kubetest2-gce/deployer/deployer.go
+	BoskosAcquireTimeoutSeconds    int    `desc:"How long (in seconds) to hang on a request to Boskos to acquire a resource before erroring."`
+	BoskosHeartbeatIntervalSeconds int    `desc:"How often (in seconds) to send a heartbeat to Boskos to hold the acquired resource. 0 means no heartbeat."`
+	BoskosLocation                 string `desc:"If set, manually specifies the location of the boskos server. If unset and boskos is needed, defaults to http://boskos.test-pods.svc.cluster.local."`
+	// boskos struct field will be non-nil when the deployer is
+	// using boskos to acquire a GCP project
+	boskos *client.Client
+	// this channel serves as a signal channel for the hearbeat goroutine
+	// so that it can be explicitly closed
+	boskosHeartbeatClose chan struct{}
 }
 
 func (d *deployer) shortRunID() string {
@@ -158,21 +183,55 @@ func (d *deployer) firewallRuleName() string {
 	return d.instanceName()
 }
 
+func (d *deployer) gcpProject() (string, error) {
+	if d.GCPProject != "" {
+		return d.GCPProject, nil
+	}
+	klog.Info("No GCP project provided, acquiring from Boskos")
+
+	boskosClient, err := boskos.NewClient(d.BoskosLocation)
+	if err != nil {
+		return "", fmt.Errorf("failed to make boskos client: %w", err)
+	}
+	d.boskos = boskosClient
+
+	resource, err := boskos.Acquire(
+		d.boskos,
+		gceProjectResourceType,
+		time.Duration(d.BoskosAcquireTimeoutSeconds)*time.Second,
+		time.Duration(d.BoskosHeartbeatIntervalSeconds)*time.Second,
+		d.boskosHeartbeatClose,
+	)
+
+	if err != nil {
+		return "", fmt.Errorf("init failed to get project from boskos: %w", err)
+	}
+	if resource.Name == "" {
+		return "", errors.New("boskos returned an empty resource name")
+	}
+	d.GCPProject = resource.Name
+	klog.Infof("Got project %q from boskos", d.GCPProject)
+
+	return d.GCPProject, nil
+}
+
 func (d *deployer) sshAddr() (string, error) {
-	if d.GCPProject == "" {
-		return "", errors.New("gcp-project is unset")
+	gcpProject, err := d.gcpProject()
+	if err != nil {
+		return "", fmt.Errorf("failed to get GCP project: %w", err)
 	}
 	if d.GCPZone == "" {
 		return "", errors.New("gcp-zone is unset")
 	}
-	return fmt.Sprintf("%s.%s.%s", d.instanceName(), d.GCPZone, d.GCPProject), nil
+	return fmt.Sprintf("%s.%s.%s", d.instanceName(), d.GCPZone, gcpProject), nil
 }
 
 func (d *deployer) gcloud(ctx context.Context, args ...string) (*exec.Cmd, error) {
-	if d.GCPProject == "" {
-		return nil, errors.New("gcp-project is unset")
+	gcpProject, err := d.gcpProject()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get GCP project: %w", err)
 	}
-	cmd := exec.CommandContext(ctx, gcloud, append([]string{"--project=" + d.GCPProject}, args...)...)
+	cmd := exec.CommandContext(ctx, gcloud, append([]string{"--project=" + gcpProject}, args...)...)
 	return cmd, nil
 }
 
@@ -323,6 +382,7 @@ func (d *deployer) upVM(ctx context.Context) error {
 	instImgPair := strings.SplitN(d.InstanceImage, "/", 2)
 
 	gcloudCmds := [][]string{
+		{"services", "enable", "compute.googleapis.com"}, // https://github.com/kubernetes-sigs/kubetest2/blob/71238a9645df6fbd7eaac9a36f635c22f1566168/kubetest2-gce/deployer/up.go#L156-L159
 		{"compute", "networks", "create", nwName},
 		{"compute", "firewall-rules", "create", fwRuleName, "--network=" + nwName, "--allow=tcp:22"},
 		{"compute", "instances", "create",
@@ -470,6 +530,17 @@ func (d *deployer) Down() error {
 		if err := execCmd(cmd); err != nil {
 			klog.Error(err)
 			// continue, to allow "not found" errors
+		}
+	}
+	if d.boskos != nil {
+		klog.Info("releasing boskos project")
+		err := boskos.Release(
+			d.boskos,
+			[]string{d.GCPProject},
+			d.boskosHeartbeatClose,
+		)
+		if err != nil {
+			return fmt.Errorf("down failed to release boskos project: %w", err)
 		}
 	}
 	return nil

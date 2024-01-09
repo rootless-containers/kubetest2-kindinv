@@ -44,3 +44,6 @@ kubetest2 kindinv \
 ```
 
 The example command above usually takes more than 30 minutes in total.
+
+### Hints
+- To use boskos, unset `--gcp-project` and set `--boskos-location=http://boskos.test-pods.svc.cluster.local` .
