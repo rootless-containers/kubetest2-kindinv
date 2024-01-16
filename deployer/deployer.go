@@ -639,8 +639,8 @@ func (d *deployer) Build() error {
 	if err != nil {
 		return fmt.Errorf("failed to get the head of %q: %w", d.KubeRoot, err)
 	}
-	cmd = d.git(ctx, "push", "--progress", "-f",
-		fmt.Sprintf("ssh://%s@%s:%s", d.User, sshAddr, gopathKK))
+	cmd = d.git(ctx, "push", "--set-upstream", "--progress", "-f",
+		fmt.Sprintf("ssh://%s@%s:%s", d.User, sshAddr, gopathKK), "master")
 	cmd.Dir = d.KubeRoot
 	if err = execCmd(cmd); err != nil {
 		return err
