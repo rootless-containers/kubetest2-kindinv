@@ -292,6 +292,9 @@ func stringifyCmdArgs(ss []string) string {
 
 func execCmd(cmd *exec.Cmd) error {
 	s := stringifyCmdArgs(cmd.Args)
+	if cmd.Dir != "" {
+		s += fmt.Sprintf(" [In %q]", cmd.Dir)
+	}
 	klog.V(0).Infof("Executing: %s", s)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
