@@ -292,6 +292,9 @@ func stringifyCmdArgs(ss []string) string {
 
 func execCmd(cmd *exec.Cmd) error {
 	s := stringifyCmdArgs(cmd.Args)
+	if cmd.Dir != "" {
+		s += fmt.Sprintf(" [In %q]", cmd.Dir)
+	}
 	klog.V(0).Infof("Executing: %s", s)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -639,8 +642,8 @@ func (d *deployer) Build() error {
 	if err != nil {
 		return fmt.Errorf("failed to get the head of %q: %w", d.KubeRoot, err)
 	}
-	cmd = d.git(ctx, "push", "--progress", "-f",
-		fmt.Sprintf("ssh://%s@%s:%s", d.User, sshAddr, gopathKK))
+	cmd = d.git(ctx, "push", "--set-upstream", "--progress", "-f",
+		fmt.Sprintf("ssh://%s@%s:%s", d.User, sshAddr, gopathKK), "master")
 	cmd.Dir = d.KubeRoot
 	if err = execCmd(cmd); err != nil {
 		return err
