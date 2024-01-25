@@ -28,4 +28,7 @@ systemctl daemon-reload
 curl -fsSL https://get.docker.com | sh
 
 # Install kind
-GOBIN=/usr/local/bin go install sigs.k8s.io/kind@latest
+#
+# > Kubernetes @ HEAD typically requires KIND @ HEAD
+# https://github.com/kubernetes-sigs/kind/pull/3487#issuecomment-1908753591
+GOBIN=/usr/local/bin go install sigs.k8s.io/kind@main
