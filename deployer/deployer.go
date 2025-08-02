@@ -519,6 +519,12 @@ func (d *deployer) Down() error {
 	}
 
 	ctx := context.TODO()
+	klog.V(1).Info("deployer starting Down()")
+
+	if err := d.DumpClusterLogs(); err != nil {
+		klog.Warningf("Dumping cluster logs at the begin of Down() failed: %s", err)
+	}
+	
 	instName, fwRuleName, nwName := d.instanceName(), d.firewallRuleName(), d.networkName()
 	gcloudCmds := [][]string{
 		{"--quiet", "compute", "instances", "delete", "--zone=" + d.GCPZone, instName},
