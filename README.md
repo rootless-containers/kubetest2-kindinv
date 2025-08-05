@@ -18,11 +18,6 @@ This driver was written for the sake of running the tests with [rootless kind](h
 ```bash
 go install github.com/rootless-containers/kubetest2-kindinv@master
 
-cd ${GOPATH}/src/k8s.io/kubernetes
-make WHAT=test/e2e/e2e.test
-make ginkgo
-make kubectl
-
 kubetest2 kindinv \
   --run-id=foo \
   --gcp-project=${CLOUDSDK_CORE_PROJECT} \

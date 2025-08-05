@@ -29,6 +29,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -40,6 +41,8 @@ import (
 	"sigs.k8s.io/boskos/client"
 	"sigs.k8s.io/kubetest2/pkg/artifacts"
 	"sigs.k8s.io/kubetest2/pkg/boskos"
+	ktexec "sigs.k8s.io/kubetest2/pkg/exec"
+	"sigs.k8s.io/kubetest2/pkg/fs"
 	"sigs.k8s.io/kubetest2/pkg/types"
 )
 
@@ -524,7 +527,7 @@ func (d *deployer) Down() error {
 	if err := d.DumpClusterLogs(); err != nil {
 		klog.Warningf("Dumping cluster logs at the begin of Down() failed: %s", err)
 	}
-	
+
 	instName, fwRuleName, nwName := d.instanceName(), d.firewallRuleName(), d.networkName()
 	gcloudCmds := [][]string{
 		{"--quiet", "compute", "instances", "delete", "--zone=" + d.GCPZone, instName},
@@ -579,36 +582,42 @@ func (d *deployer) DumpClusterLogs() error {
 	return nil
 }
 
-func (d *deployer) Build() error {
-	ctx := context.TODO()
-	runDir := d.commonOptions.RunDir()
+// buildE2ERequirements was taken from https://github.com/kubernetes-sigs/kubetest2/pull/275
+func (d *deployer) buildE2ERequirements() error {
+	const target = "all"
+	klog.V(0).Infof("Build(): build e2e requirements...\n")
+	e2ePath := "test/e2e/e2e.test"
+	kubectlPath := "cmd/kubectl"
+	ginkgoPath := "vendor/github.com/onsi/ginkgo/v2/ginkgo"
 
-	// Prepare `runDir/{e2e.test, ginkgo}`
-	for _, f := range []string{"e2e.test", "ginkgo", "kubectl"} {
-		src := filepath.Join(d.KubeRoot, "_output", "bin", f)
-		if _, err := os.Stat(src); err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-			switch f {
-			case "e2e.test":
-				klog.Warning(fmt.Errorf("%w (Hint: `make WHAT=test/e2e/e2e.test -C $(go env GOPATH)/src/k8s.io/kubernetes`)", err))
-				continue
-			case "ginkgo":
-				klog.Warning(fmt.Errorf("%w (Hint: `make ginkgo -C $(go env GOPATH)/src/k8s.io/kubernetes`)", err))
-				continue
-			default:
-				klog.Warning(err)
-				continue
-			}
-		}
-		dst := filepath.Join(runDir, f)
-		cmd := exec.CommandContext(ctx, "cp", "-af", src, dst)
-		if err := execCmd(cmd); err != nil {
-			return err
+	// make sure we have e2e requirements
+	cmd := ktexec.Command("make", target,
+		fmt.Sprintf("WHAT=%s %s %s", kubectlPath, e2ePath, ginkgoPath))
+	cmd.SetDir(d.KubeRoot)
+	ktexec.InheritOutput(cmd)
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+
+	//move files
+	const dockerizedOutput = "_output/dockerized"
+	for _, binary := range commonTestBinaries {
+		source := filepath.Join(d.KubeRoot, "_output/bin", binary)
+		dest := filepath.Join(d.KubeRoot, dockerizedOutput, "bin", runtime.GOOS, runtime.GOARCH, binary)
+		if err := fs.CopyFile(source, dest); err != nil {
+			klog.Warningf("failed to copy %s to %s: %v", source, dest, err)
 		}
 	}
 
+	storeCommonBinaries(d.KubeRoot, d.commonOptions.RunDir())
+	return nil
+}
+
+func (d *deployer) Build() error {
+	ctx := context.TODO()
+	if err := d.buildE2ERequirements(); err != nil {
+		return fmt.Errorf("failed to build e2e requirements: %w", err)
+	}
 	isUp, err := d.IsUp()
 	if err != nil {
 		return err
@@ -688,4 +697,31 @@ func bindFlags(d *deployer) *pflag.FlagSet {
 	flags.AddGoFlagSet(flag.CommandLine)
 
 	return flags
+}
+
+// commonTestBinaries is from https://github.com/kubernetes-sigs/kubetest2/blob/1ad71e1e364e6a6e75b102194eaed191fbae630c/pkg/build/build.go#L76-L82
+var commonTestBinaries = []string{
+	"kubectl",
+	"e2e.test",
+	"ginkgo",
+}
+
+// storeCommonBinaries will best effort try to store commonly built binaries
+// to the output directory.
+// From https://github.com/kubernetes-sigs/kubetest2/blob/1ad71e1e364e6a6e75b102194eaed191fbae630c/pkg/build/build.go#L84-L101
+func storeCommonBinaries(kuberoot string, outroot string) {
+	const dockerizedOutput = "_output/dockerized"
+	root := filepath.Join(kuberoot, dockerizedOutput, "bin", runtime.GOOS, runtime.GOARCH)
+	for _, binary := range commonTestBinaries {
+		source := filepath.Join(root, binary)
+		dest := filepath.Join(outroot, binary)
+		if _, err := os.Stat(source); err == nil {
+			klog.V(2).Infof("copying %s to %s ...", source, dest)
+			if err := fs.CopyFile(source, dest); err != nil {
+				klog.Warningf("failed to copy %s to %s: %v", source, dest, err)
+			}
+		} else {
+			klog.Warningf("could not find %s: %v", source, err)
+		}
+	}
 }
