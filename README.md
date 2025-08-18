@@ -22,7 +22,7 @@ kubetest2 kindinv \
   --run-id=foo \
   --gcp-project=${CLOUDSDK_CORE_PROJECT} \
   --gcp-zone=us-west1-a \
-  --instance-image=ubuntu-os-cloud/ubuntu-2204-lts \
+  --instance-image=ubuntu-os-cloud/ubuntu-2404-lts-amd64 \
   --instance-type=n2-standard-4 \
   --user=rootless \
   --kind-rootless \
