@@ -113,7 +113,7 @@ func New(opts types.Options) (types.Deployer, *pflag.FlagSet) {
 		KubeRoot:                       kubeRoot,
 		GCPProject:                     os.Getenv("CLOUDSDK_CORE_PROJECT"),
 		GCPZone:                        os.Getenv("CLOUDSDK_COMPUTE_ZONE"),
-		InstanceImage:                  "ubuntu-os-cloud/ubuntu-2204-lts",
+		InstanceImage:                  "ubuntu-os-cloud/ubuntu-2404-lts-amd64",
 		InstanceType:                   "n2-standard-4",
 		DiskGiB:                        200,
 		User:                           username,

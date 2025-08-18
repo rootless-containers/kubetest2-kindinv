@@ -1,6 +1,6 @@
 #!/bin/bash
 # The provisioning script for kubetest2-kindinv.
-# Expected to be used with Ubuntu 22.04.
+# Expected to be used with Ubuntu 22.04 or later.
 # TODO: support non-Ubuntu too
 set -eux -o pipefail
 
